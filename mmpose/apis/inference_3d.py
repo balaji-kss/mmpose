@@ -16,6 +16,71 @@ from mmcv.utils.misc import deprecated_api_warning
 from mmpose.core.bbox import bbox_xywh2cs, bbox_xywh2xyxy, bbox_xyxy2xywh
 from mmpose.datasets.pipelines import Compose
 
+def write_2d_skel(pose2d_seq, output_num, tid, image_size):
+
+    # Create a figure and an axes
+    fig, ax = plt.subplots()
+    print('Writing seq: ',  output_num)
+    output = f"test_skel_{output_num}_{tid}.mp4"
+    output_dir = f"test_skel_{output_num}_{tid}"
+
+    connections = [
+        (0, 1),
+        (1, 4),
+        (1, 2),
+        (2, 3),
+        (4, 5),
+        (5, 6),
+        (1, 14),
+        (4, 11),
+        (11, 12),
+        (12, 13),
+        (14, 15),
+        (15, 16),
+        (8, 9),
+        (9, 10),
+        (14, 7),
+        (7, 11),
+        (14, 8),
+        (8, 11),
+    ]
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Generate each frame and save as an image file
+    for t, joints in enumerate(pose2d_seq):
+        plt.figure()
+        for connection in connections:
+            if pose2d_seq[t, connection[0], 2] <= 0 or pose2d_seq[t, connection[1], 2] <= 0:continue
+            xs = [pose2d_seq[t, connection[0], 0], pose2d_seq[t, connection[1], 0]]
+            ys = [pose2d_seq[t, connection[0], 1], pose2d_seq[t, connection[1], 1]]
+            plt.plot(xs, ys, 'o-', color='green')
+        plt.xlim(0, image_size[0])
+        plt.ylim(image_size[1], 0)  # Invert Y axis to have the origin at the top-left corner
+        plt.grid(True)
+        plt.savefig(f'{output_dir}/frame{t}.jpg')
+        plt.close()
+
+    # Compile the frames into a video using OpenCV
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for .mp4 format
+    video = cv2.VideoWriter(output, fourcc, 5, (640, 480))  # 5 is the FPS, (560, 400) is the frame size
+
+    for i in range(len(pose2d_seq)):
+        img = cv2.imread(f'{output_dir}/frame{i}.jpg')
+        if img is None:continue
+        video.write(img)
+
+    video.release()
+    cv2.destroyAllWindows()
+
+    if os.path.exists(output_dir):
+        # Remove the directory and all its contents
+        shutil.rmtree(output_dir)
+        print(f"The directory {output_dir} and all its contents have been deleted.")
+    else:
+        print(f"The directory {output_dir} does not exist.")
+        
 def extract_pose_sequence(pose_results, frame_idx, causal, seq_len, step=1):
     """Extract the target frame from 2D pose results, and pad the sequence to a
     fixed length.
@@ -287,7 +352,8 @@ def process_bbox(bbox, width, height):
     bbox[0] = c_x - bbox[2]/2.
     bbox[1] = c_y - bbox[3]/2.
     return bbox
-    
+
+
 def inference_pose_lifter_model(model,
                                 pose_results_2d,
                                 dataset=None,
