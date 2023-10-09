@@ -73,6 +73,8 @@ def init_pose_model(config, checkpoint=None, device='cuda:0'):
                         f'but got {type(config)}')
     config.model.pretrained = None
     model = build_posenet(config.model)
+    model.head = model.keypoint_head
+
     if checkpoint is not None:
         # load model checkpoint
         load_checkpoint(model, checkpoint, map_location='cpu')
@@ -80,6 +82,7 @@ def init_pose_model(config, checkpoint=None, device='cuda:0'):
     model.cfg = config
     model.to(device)
     model.eval()
+    
     return model
 
 def _xyxy2xywh(bbox_xyxy):

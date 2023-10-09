@@ -158,10 +158,14 @@ class ImageCoordinateNormalization:
             self.camera_param = camera_param
 
     def __call__(self, results):
-        center = results['centers']
-        scale = np.max(np.array(results['scales'][:, 0] * .5, dtype=np.float32))
+        center = np.array(
+            [0.5 * results['image_width'], 0.5 * results['image_height']],
+            dtype=np.float32)
+        scale = np.array(0.5 * results['image_width'], dtype=np.float32)
+
         for item in self.item:
-            results[item] = (results[item] - center[:, None, :])/scale
+            results[item] = (results[item] - center) / scale
+
         if self.norm_camera:
             if self.static_camera:
                 camera_param = copy.deepcopy(self.camera_param)
@@ -450,6 +454,10 @@ class PoseSequenceToTensor:
     def __call__(self, results):
         assert self.item in results
         seq = results[self.item]
+        T, K, C = seq.shape
+        seq_visible = results['input_2d_visible'].reshape((T, K, 1))
+        
+        seq = np.concatenate((seq, seq_visible), axis=-1)
 
         assert isinstance(seq, np.ndarray)
         assert seq.ndim in {2, 3}
@@ -459,10 +467,10 @@ class PoseSequenceToTensor:
 
         T = seq.shape[0]
         seq = seq.transpose(1, 2, 0).reshape(-1, T)
+
         results[self.item] = torch.from_numpy(seq)
 
         return results
-
 
 @PIPELINES.register_module()
 class Generate3DHeatmapTarget:

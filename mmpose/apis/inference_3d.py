@@ -61,11 +61,20 @@ def extract_pose_sequence(pose_results, frame_idx, causal, seq_len, step=1):
         pose_results[start:end:step] + [pose_results[-1]] * pad_right
     return pose_results_seq
 
+def kpts2d_conf_mask(kpts_2d, conf_thresh):
+
+    kpts_conf = kpts_2d[:, 2]
+    kpts_conf = kpts_conf > conf_thresh
+    kpts_conf = kpts_conf.astype('int')
+    kpts_conf = np.concatenate((kpts_2d[:, :2], kpts_conf.reshape((17, 1))), axis=1)
+    
+    return kpts_conf
 
 def _gather_pose_lifter_inputs(pose_results,
                                bbox_center,
                                bbox_scale,
-                               norm_pose_2d=False):
+                               norm_pose_2d=False,
+                               conf_thresh = 0.35):
     """Gather input data (keypoints and track_id) for pose lifter model.
 
     Note:
@@ -125,14 +134,70 @@ def _gather_pose_lifter_inputs(pose_results,
                 inputs['keypoints'] = np.concatenate(
                     [inputs['keypoints'], res['keypoints'][:, 2:]], axis=1)
 
+            inputs['keypoints'] = kpts2d_conf_mask(inputs['keypoints'], conf_thresh)
+
             if 'track_id' in res:
                 inputs['track_id'] = res['track_id']
             frame_inputs.append(inputs)
         sequence_inputs.append(frame_inputs)
     return sequence_inputs
 
+def interpolate_missing_values(data, W):
+    
+    zero_indices = np.where(data[:, 0] == 0)[0]  # Assuming if one dimension is 0, all are 0
+    
+    if len(zero_indices) == 0:
+        return data
+    
+    groups = np.split(zero_indices, np.where(np.diff(zero_indices) != 1)[0] + 1)
+    
+    for group in groups:
+        if len(group) > W:
+            start = group[0]    
+            data[start:] = data[start-1]
+            break
+        
+        start, end = group[0], group[-1]
+        
+        # Handle edge cases where missing values are at the beginning or end of the array
+        if start == 0:
+            data[start:end+1] = data[end+1]
+        elif end == len(data) - 1:
+            data[start:end+1] = data[start-1]
+        else:
+            for i in range(data.shape[1]):
+                data[start:end+1, i] = np.linspace(data[start-1, i], data[end+1, i], len(group)+2)[1:-1]
+    
+    return data
 
-def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1):
+def fill_sequence(pose_results_2d, keypoints, tid, max_win_size):
+
+    num_seq = len(pose_results_2d)
+    T, K, C = keypoints.shape
+
+    for fid in range(num_seq):
+        for res in pose_results_2d[fid]:
+            if res['track_id'] == tid:
+                keypoints[fid] = res['keypoints']
+    
+    target_idx = int(num_seq // 2)
+
+    # pad + interpolate sequence
+    for k in range(K):
+        # from target to left
+        left_temp_seq = keypoints[:target_idx + 1, k, :]
+        left_seq = left_temp_seq[::-1]
+        interp_left_seq = interpolate_missing_values(left_seq, max_win_size)        
+        keypoints[:target_idx + 1, k, :] = interp_left_seq[::-1]
+
+        # from target to right
+        right_temp_seq = keypoints[target_idx:, k, :]
+        interp_right_seq = interpolate_missing_values(right_temp_seq, max_win_size)
+        keypoints[target_idx:, k, :] = interp_right_seq
+
+    return keypoints
+
+def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1, max_win_size=30):
     """Reorganize multi-frame pose detection results into individual pose
     sequences.
 
@@ -168,7 +233,7 @@ def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1):
     if N == 0:
         return []
 
-    K, C = pose_results[target_frame][0]['keypoints'].shape
+    K, C = pose_results[target_frame][0]['keypoints'].shape #(17, 3)
 
     track_ids = None
     if with_track_id:
@@ -189,35 +254,11 @@ def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1):
             keypoints = np.zeros((T, K, C), dtype=np.float32)
             keypoints[target_frame] = pose_results[target_frame][idx][
                 'keypoints']
-            # find the left most frame containing track_ids[idx]
-            for frame_idx in range(target_frame - 1, -1, -1):
-                contains_idx = False
-                for res in pose_results[frame_idx]:
-                    if res['track_id'] == track_ids[idx]:
-                        keypoints[frame_idx] = res['keypoints']
-                        contains_idx = True
-                        break
-                if not contains_idx:
-                    # replicate the left most frame
-                    keypoints[:frame_idx + 1] = keypoints[frame_idx + 1]
-                    break
-            # find the right most frame containing track_idx[idx]
-            for frame_idx in range(target_frame + 1, T):
-                contains_idx = False
-                for res in pose_results[frame_idx]:
-                    if res['track_id'] == track_ids[idx]:
-                        keypoints[frame_idx] = res['keypoints']
-                        contains_idx = True
-                        break
-                if not contains_idx:
-                    # replicate the right most frame
-                    keypoints[frame_idx + 1:] = keypoints[frame_idx]
-                    break
+            keypoints = fill_sequence(pose_results, keypoints, track_ids[idx], max_win_size)
             pose_seq['keypoints'] = keypoints
         pose_sequences.append(pose_seq)
 
     return pose_sequences
-
 
 def process_bbox(bbox, width, height):
     # sanitize bboxes
@@ -254,6 +295,7 @@ def inference_pose_lifter_model(model,
                                 with_track_id=True,
                                 image_size=None,
                                 norm_pose_2d=False,
+                                conf_thresh = 0.35,
                                 output_num=0,
                                 trt=True):
     """Inference 3D pose from 2D pose sequences using a pose lifter model.
@@ -321,7 +363,7 @@ def inference_pose_lifter_model(model,
         target_idx = -1 if model.causal else len(pose_results_2d) // 2
     pose_lifter_inputs = _gather_pose_lifter_inputs(pose_results_2d,
                                                     bbox_center, bbox_scale,
-                                                    norm_pose_2d)
+                                                    norm_pose_2d, conf_thresh = conf_thresh)
     pose_sequences_2d = _collate_pose_sequence(pose_lifter_inputs,
                                                with_track_id, target_idx)
 
@@ -332,48 +374,18 @@ def inference_pose_lifter_model(model,
     count = 0
     for seq in pose_sequences_2d:
         pose_2d = seq['keypoints'].astype(np.float32)
-        T, K, C = pose_2d.shape
+        T, K, C = pose_2d.shape #(243, 17, 3)
 
-        input_2d = pose_2d[..., :2]
-        input_2d_visible = pose_2d[..., 2:3]
-        if C > 2:
-            input_2d_visible = pose_2d[..., 2:3]
-        else:
-            input_2d_visible = np.ones((T, K, 1), dtype=np.float32)
-        
-        for i in range(1, input_2d.shape[0]):
-            if (np.all(input_2d[i] == 0)):
-                input_2d[i] = input_2d[i-1]
-        # TODO: Will be removed in the later versions
-        # Dummy 3D input
-        # This is for compatibility with configs in mmpose<=v0.14.0, where a
-        # 3D input is required to generate denormalization parameters. This
-        # part will be removed in the future.
+        input_2d = pose_2d[:, :, :2]
+        input_2d_visible = pose_2d[:, :, 2]
+
         target = np.zeros((K, 3), dtype=np.float32)
-        target_visible = np.ones((K, 1), dtype=np.float32)
-
-        # Dummy image path
-        # This is for compatibility with configs in mmpose<=v0.14.0, where
-        # target_image_path is required. This part will be removed in the
-        # future.
+        target_visible = pose_2d[target_idx, :, 2].reshape((-1, 1)).astype(np.float32)
         target_image_path = None
-        bbox_min = np.min(input_2d, axis=1)
-        bbox_max = np.max(input_2d, axis=1)
-        bbox = np.hstack((bbox_min, bbox_max - bbox_min))
-        bbox_final = np.zeros_like(bbox)
-        for i in range(bbox.shape[0]):
-            bbox_final[i] = process_bbox(bbox[i], image_size[0], image_size[1])
-        centers = input_2d[:, 0, :]
-        scale = np.expand_dims(np.max(bbox_final[2:], axis=1), axis=1)
-        scale = np.hstack((scale, scale))
-        scale = np.where(np.isnan(scale), max(image_size[0], image_size[1])/2, scale)
-        centers[:, 0] = np.where(centers[:, 0] == 0, image_size[0]/2, centers[:, 0])
-        centers[:, 1] = np.where(centers[:, 1] == 0, image_size[1]/2, centers[:, 1])
+        
         data = {
             'input_2d': input_2d,
             'input_2d_visible': input_2d_visible,
-            'scales': scale,
-            'centers': centers,
             'target': target,
             'target_visible': target_visible,
             'target_image_path': target_image_path,
@@ -388,34 +400,13 @@ def inference_pose_lifter_model(model,
             data['image_width'] = image_size[0]
             data['image_height'] = image_size[1]
         
-        
         data = test_pipeline(data)
         batch_data.append(data)
-        
-#         output = f"test_skel_{output_num}.mp4"
-#         disp_name = output
-#         writer = cv2.VideoWriter(
-#             filename=disp_name,
-#             fps=30,
-#             fourcc=cv2.VideoWriter_fourcc('m', 'p', '4', 'v'),
-#             frameSize=(1000, 1000)
-#         )
-        
-#         a = data["input"].cpu().detach().numpy()
-#         for i in range(a.shape[1]):
-            
-#             arr = a[:, i].reshape((17, 2))
-#             processed_img = image.show_keypoints(
-#                 arr,
-#                 1000,
-#                 pose_kpt_color=np.ones((17, 3)) * 255,
-#                 skeleton=dataset_info_obj.skeleton,
-#                 pose_link_color=np.ones((len(dataset_info_obj.skeleton), 3)) * 255
-#             )
 
-#             writer.write(processed_img)
-#         writer.release()
-        
+        # test visualize input
+        # tid = seq['track_id']
+        # if output_num % 30 == 0 and tid == 1:
+        #     write_2d_skel(pose_2d, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
     if trt:
@@ -427,7 +418,7 @@ def inference_pose_lifter_model(model,
             batch_data = scatter(batch_data, target_gpus=[device.index])[0]
         else:
             batch_data = scatter(batch_data, target_gpus=[-1])[0]
-    if (trt):
+    if trt:
         poses_3d = []
         for i in range(batch_data["input"].shape[0]):
             with torch.no_grad():
