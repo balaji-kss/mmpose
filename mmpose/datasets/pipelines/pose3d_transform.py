@@ -455,8 +455,13 @@ class PoseSequenceToTensor:
         assert self.item in results
         seq = results[self.item]
         T, K, C = seq.shape
-        seq_visible = results['input_2d_visible'].reshape((T, K, 1))
-        
+        seq_visible = results['input_2d_visible']
+
+        # mask joints to 0
+        seq[:, :, 0] *= seq_visible
+        seq[:, :, 1] *= seq_visible
+
+        seq_visible = seq_visible.reshape((T, K, 1))
         seq = np.concatenate((seq, seq_visible), axis=-1)
 
         assert isinstance(seq, np.ndarray)
