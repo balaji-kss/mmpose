@@ -528,7 +528,7 @@ class PoseSequenceToTensor:
         seq = results[self.item]
         T, K, C = seq.shape
         seq_visible = results['input_2d_visible']
-
+        
         # mask joints to 0
         seq[:, :, 0] *= seq_visible
         seq[:, :, 1] *= seq_visible

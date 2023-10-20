@@ -135,17 +135,15 @@ def kpts2d_conf_mask(kpts_2d, conf_thresh):
     kpts_conf = kpts_2d[:, 2]
     kpts_conf = kpts_conf > conf_thresh
     kpts_conf = kpts_conf.astype('int')
-    kpts_conf[[2, 3, 5, 6]] = 0.0
+
     kpts_conf = np.concatenate((kpts_2d[:, :2], kpts_conf.reshape((17, 1))), axis=1)
     
-
     return kpts_conf
 
 def _gather_pose_lifter_inputs(pose_results,
                                bbox_center,
                                bbox_scale,
-                               norm_pose_2d=False,
-                               conf_thresh = 0.35):
+                               norm_pose_2d=False):
     """Gather input data (keypoints and track_id) for pose lifter model.
 
     Note:
@@ -204,8 +202,6 @@ def _gather_pose_lifter_inputs(pose_results,
             if res['keypoints'].shape[1] == 3:
                 inputs['keypoints'] = np.concatenate(
                     [inputs['keypoints'], res['keypoints'][:, 2:]], axis=1)
-            
-            inputs['keypoints'] = kpts2d_conf_mask(inputs['keypoints'], conf_thresh)
 
             if 'track_id' in res:
                 inputs['track_id'] = res['track_id']
@@ -435,10 +431,10 @@ def inference_pose_lifter_model(model,
         target_idx = -1 if model.causal else len(pose_results_2d) // 2
     pose_lifter_inputs = _gather_pose_lifter_inputs(pose_results_2d,
                                                     bbox_center, bbox_scale,
-                                                    norm_pose_2d, conf_thresh = conf_thresh)
+                                                    norm_pose_2d)
+
     pose_sequences_2d = _collate_pose_sequence(pose_lifter_inputs,
                                                with_track_id, target_idx)
-
     if not pose_sequences_2d:
         return []
 
@@ -447,6 +443,9 @@ def inference_pose_lifter_model(model,
     for seq in pose_sequences_2d:
         pose_2d = seq['keypoints'].astype(np.float32)
         T, K, C = pose_2d.shape #(243, 17, 3)
+
+        for t in range(T):
+            pose_2d[t] = kpts2d_conf_mask(pose_2d[t], conf_thresh)
 
         input_2d = pose_2d[:, :, :2]
         input_2d_visible = pose_2d[:, :, 2]
@@ -474,15 +473,14 @@ def inference_pose_lifter_model(model,
         
         data = test_pipeline(data)
         batch_data.append(data)
-
+        
         ## test visualize input
         # tid = seq['track_id']
-        # if output_num % 30 == 0 and tid == 1:
+        # if output_num == 150 and tid == 1:
         #     keypoints = data['input'].numpy() #(17 * 3, 243)
         #     keypoints = np.transpose(keypoints)
         #     num_seq = keypoints.shape[0]
         #     keypoints = keypoints.reshape((num_seq, 17, -1))
-        
         #     write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
