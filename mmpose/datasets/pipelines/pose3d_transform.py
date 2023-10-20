@@ -182,6 +182,78 @@ class ImageCoordinateNormalization:
 
         return results
 
+@PIPELINES.register_module()
+class RelativeNormalization:
+    """Normalize the 2D joint coordinate with image width and height. Range [0,
+    w] is mapped to [-1, 1], while preserving the aspect ratio.
+
+    Args:
+        item (str|list[str]): The name of the pose to normalize.
+        norm_camera (bool): Whether to normalize camera intrinsics.
+            Default: False.
+        camera_param (dict|None): The camera parameter dict. See the camera
+            class definition for more details. If None is given, the camera
+            parameter will be obtained during processing of each data sample
+            with the key "camera_param".
+
+    Required keys:
+        item
+
+    Modified keys:
+        item (, camera_param)
+    """
+
+    def __init__(self):
+        pass
+
+    def square_box_pad(self, bbox, pad = 0.1):
+
+        # make the bbox a square
+        cx, cy = 0.5 * (bbox[2:] + bbox[:2])
+        w, h = bbox[2:] - bbox[:2]
+        sz = max(w, h)
+        # pad the bbox 
+        sz = (1 + 2 * pad) * sz
+
+        xmin, ymin = cx - 0.5 * sz, cy - 0.5 * sz
+        xmax, ymax = cx + 0.5 * sz, cy + 0.5 * sz
+
+        pad_bbox = np.array([xmin, ymin, xmax, ymax], dtype = 'float')
+
+        return pad_bbox
+
+    def __call__(self, results):
+
+        keypoints = results['input_2d']
+        keypoints_visible = results['input_2d_visible']
+        keypoints = keypoints - keypoints[:, 0:1, :]
+
+        # pick keypoints which are valid
+        mask_keypoint_labels = np.copy(keypoints)
+        mask_keypoint_labels[:, :, 0] *= keypoints_visible
+        mask_keypoint_labels[:, :, 1] *= keypoints_visible
+
+        min_frames = np.min(mask_keypoint_labels, axis = 1) #(243, 2)
+        gxmin, gymin = np.min(min_frames, axis = 0) #(2, )
+
+        max_frames = np.max(mask_keypoint_labels, axis = 1) #(243, 2)
+        gxmax, gymax = np.max(max_frames, axis = 0) #(2, )
+
+        bbox = np.array([gxmin, gymin, gxmax, gymax])
+        # pad bbox
+        sqr_bbox = self.square_box_pad(bbox)
+        # shift keyoints
+        keypoints[:, :, 0] -= sqr_bbox[0]
+        keypoints[:, :, 1] -= sqr_bbox[1]
+
+        bw, bh = sqr_bbox[2:] - sqr_bbox[:2] 
+
+        keypoints[:, :, 0] /= bw
+        keypoints[:, :, 1] /= bh
+
+        results['input_2d'] = keypoints 
+        
+        return results
 
 @PIPELINES.register_module()
 class CollectCameraIntrinsics:

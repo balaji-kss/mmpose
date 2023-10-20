@@ -15,14 +15,18 @@ import mmcv
 from mmcv.utils.misc import deprecated_api_warning
 from mmpose.core.bbox import bbox_xywh2cs, bbox_xywh2xyxy, bbox_xyxy2xywh
 from mmpose.datasets.pipelines import Compose
+import matplotlib.pyplot as plt
+import os
+import shutil
 
 def write_2d_skel(pose2d_seq, output_num, tid, image_size):
 
     # Create a figure and an axes
     fig, ax = plt.subplots()
-    print('Writing seq: ',  output_num)
+    
     output = f"test_skel_{output_num}_{tid}.mp4"
     output_dir = f"test_skel_{output_num}_{tid}"
+    print('Writing seq: ',  output_num, output, output_dir)
 
     connections = [
         (0, 1),
@@ -56,8 +60,8 @@ def write_2d_skel(pose2d_seq, output_num, tid, image_size):
             xs = [pose2d_seq[t, connection[0], 0], pose2d_seq[t, connection[1], 0]]
             ys = [pose2d_seq[t, connection[0], 1], pose2d_seq[t, connection[1], 1]]
             plt.plot(xs, ys, 'o-', color='green')
-        plt.xlim(0, image_size[0])
-        plt.ylim(image_size[1], 0)  # Invert Y axis to have the origin at the top-left corner
+        plt.xlim(0, 1)
+        plt.ylim(1, 0)  # Invert Y axis to have the origin at the top-left corner
         plt.grid(True)
         plt.savefig(f'{output_dir}/frame{t}.jpg')
         plt.close()
@@ -131,8 +135,10 @@ def kpts2d_conf_mask(kpts_2d, conf_thresh):
     kpts_conf = kpts_2d[:, 2]
     kpts_conf = kpts_conf > conf_thresh
     kpts_conf = kpts_conf.astype('int')
+    kpts_conf[[2, 3, 5, 6]] = 0.0
     kpts_conf = np.concatenate((kpts_2d[:, :2], kpts_conf.reshape((17, 1))), axis=1)
     
+
     return kpts_conf
 
 def _gather_pose_lifter_inputs(pose_results,
@@ -198,7 +204,7 @@ def _gather_pose_lifter_inputs(pose_results,
             if res['keypoints'].shape[1] == 3:
                 inputs['keypoints'] = np.concatenate(
                     [inputs['keypoints'], res['keypoints'][:, 2:]], axis=1)
-
+            
             inputs['keypoints'] = kpts2d_conf_mask(inputs['keypoints'], conf_thresh)
 
             if 'track_id' in res:
@@ -469,10 +475,15 @@ def inference_pose_lifter_model(model,
         data = test_pipeline(data)
         batch_data.append(data)
 
-        # test visualize input
+        ## test visualize input
         # tid = seq['track_id']
         # if output_num % 30 == 0 and tid == 1:
-        #     write_2d_skel(pose_2d, output_num, tid = tid, image_size=image_size)
+        #     keypoints = data['input'].numpy() #(17 * 3, 243)
+        #     keypoints = np.transpose(keypoints)
+        #     num_seq = keypoints.shape[0]
+        #     keypoints = keypoints.reshape((num_seq, 17, -1))
+        
+        #     write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
     if trt:
