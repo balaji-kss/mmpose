@@ -60,6 +60,8 @@ def write_2d_skel(pose2d_seq, output_num, tid, image_size):
             xs = [pose2d_seq[t, connection[0], 0], pose2d_seq[t, connection[1], 0]]
             ys = [pose2d_seq[t, connection[0], 1], pose2d_seq[t, connection[1], 1]]
             plt.plot(xs, ys, 'o-', color='green')
+
+        plt.title("Frame: " + str(t)) 
         plt.xlim(0, 1)
         plt.ylim(1, 0)  # Invert Y axis to have the origin at the top-left corner
         plt.grid(True)
@@ -225,7 +227,7 @@ def interpolate_missing_values(data, W):
             break
         
         start, end = group[0], group[-1]
-        
+
         # Handle edge cases where missing values are at the beginning or end of the array
         if start == 0:
             data[start:end+1] = data[end+1]
@@ -264,7 +266,7 @@ def fill_sequence(pose_results_2d, keypoints, tid, max_win_size):
 
     return keypoints
 
-def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1, max_win_size=30):
+def _collate_pose_sequence(pose_results, with_track_id=True, target_frame=-1, max_win_size=10):
     """Reorganize multi-frame pose detection results into individual pose
     sequences.
 
@@ -475,13 +477,14 @@ def inference_pose_lifter_model(model,
         batch_data.append(data)
         
         ## test visualize input
-        # tid = seq['track_id']
-        # if output_num == 150 and tid == 1:
-        #     keypoints = data['input'].numpy() #(17 * 3, 243)
-        #     keypoints = np.transpose(keypoints)
-        #     num_seq = keypoints.shape[0]
-        #     keypoints = keypoints.reshape((num_seq, 17, -1))
-        #     write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
+        tid = seq['track_id']
+        if output_num % 30 == 0 and tid == 0:
+            print('Writing Sequence: ', output_num, ' track_id ', tid)
+            keypoints = data['input'].numpy() #(17 * 3, 243)
+            keypoints = np.transpose(keypoints)
+            num_seq = keypoints.shape[0]
+            keypoints = keypoints.reshape((num_seq, 17, -1))
+            write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
     if trt:
