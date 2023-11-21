@@ -121,8 +121,8 @@ val_pipeline = [
         root_index=0,
         root_name='root_position',
         remove_root=False),
-    # dict(type='ImageCoordinateNormalization', item='input_2d'),
-    dict(type='RelativeNormalization'),
+    dict(type='ImageCoordinateNormalization', item='input_2d'),
+    # dict(type='RelativeNormalization'),
     dict(type='PoseSequenceToTensor', item='input_2d'),
     dict(
         type='Collect',

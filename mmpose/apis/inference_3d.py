@@ -62,8 +62,8 @@ def write_2d_skel(pose2d_seq, output_num, tid, image_size):
             plt.plot(xs, ys, 'o-', color='green')
 
         plt.title("Frame: " + str(t)) 
-        plt.xlim(0, 1)
-        plt.ylim(1, 0)  # Invert Y axis to have the origin at the top-left corner
+        plt.xlim(-1, 1)
+        plt.ylim(1, -1)  # Invert Y axis to have the origin at the top-left corner
         plt.grid(True)
         plt.savefig(f'{output_dir}/frame{t}.jpg')
         plt.close()
@@ -477,14 +477,14 @@ def inference_pose_lifter_model(model,
         batch_data.append(data)
         
         ## test visualize input
-        tid = seq['track_id']
-        if output_num % 30 == 0 and tid == 0:
-            print('Writing Sequence: ', output_num, ' track_id ', tid)
-            keypoints = data['input'].numpy() #(17 * 3, 243)
-            keypoints = np.transpose(keypoints)
-            num_seq = keypoints.shape[0]
-            keypoints = keypoints.reshape((num_seq, 17, -1))
-            write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
+        # tid = seq['track_id']
+        # if output_num % 30 == 0 and tid == 0:
+        #     print('Writing Sequence: ', output_num, ' track_id ', tid)
+        #     keypoints = data['input'].numpy() #(17 * 3, 243)
+        #     keypoints = np.transpose(keypoints)
+        #     num_seq = keypoints.shape[0]
+        #     keypoints = keypoints.reshape((num_seq, 17, -1))
+        #     write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
     if trt:
