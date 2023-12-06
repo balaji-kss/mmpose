@@ -191,6 +191,8 @@ def _gather_pose_lifter_inputs(pose_results,
         for res in frame:
             inputs = dict()
 
+	    if 'keypoints' not in res:continue
+
             if norm_pose_2d:
                 bbox = res['bbox']
                 center = np.array([[(bbox[0] + bbox[2]) / 2,
@@ -243,7 +245,7 @@ def fill_sequence(pose_results_2d, keypoints, tid, max_win_size):
 
     num_seq = len(pose_results_2d)
     T, K, C = keypoints.shape
-
+    print('max_win_size ', max_win_size)
     for fid in range(num_seq):
         for res in pose_results_2d[fid]:
             if res['track_id'] == tid:
@@ -364,6 +366,7 @@ def inference_pose_lifter_model(model,
                                 dataset_info=None,
                                 with_track_id=True,
                                 image_size=None,
+				fps=10,
                                 norm_pose_2d=False,
                                 conf_thresh = 0.35,
                                 output_num=0,
@@ -434,9 +437,9 @@ def inference_pose_lifter_model(model,
     pose_lifter_inputs = _gather_pose_lifter_inputs(pose_results_2d,
                                                     bbox_center, bbox_scale,
                                                     norm_pose_2d)
-
+    win_size = int(round(fps))
     pose_sequences_2d = _collate_pose_sequence(pose_lifter_inputs,
-                                               with_track_id, target_idx)
+                                               with_track_id, target_idx, max_win_size=win_size)
     if not pose_sequences_2d:
         return []
 
@@ -479,12 +482,12 @@ def inference_pose_lifter_model(model,
         ## test visualize input
         # tid = seq['track_id']
         # if output_num % 30 == 0 and tid == 0:
-        #     print('Writing Sequence: ', output_num, ' track_id ', tid)
-        #     keypoints = data['input'].numpy() #(17 * 3, 243)
-        #     keypoints = np.transpose(keypoints)
-        #     num_seq = keypoints.shape[0]
-        #     keypoints = keypoints.reshape((num_seq, 17, -1))
-        #     write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
+        #   print('Writing Sequence: ', output_num, ' track_id ', tid)
+        #    keypoints = data['input'].numpy() #(17 * 3, 243)
+        #    keypoints = np.transpose(keypoints)
+        #    num_seq = keypoints.shape[0]
+        #    keypoints = keypoints.reshape((num_seq, 17, -1))
+        #    write_2d_skel(keypoints, output_num, tid = tid, image_size=image_size)
             
     batch_data = collate(batch_data, samples_per_gpu=len(batch_data))
     if trt:

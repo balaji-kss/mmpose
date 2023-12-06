@@ -162,7 +162,8 @@ class ImageCoordinateNormalization:
             [0.5 * results['image_width'], 0.5 * results['image_height']],
             dtype=np.float32)
         scale = np.array(0.5 * results['image_width'], dtype=np.float32)
-
+        # print('center ', center)
+        # print('scale ', scale)
         for item in self.item:
             results[item] = (results[item] - center) / scale
 
