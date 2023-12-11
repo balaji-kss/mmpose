@@ -191,7 +191,8 @@ def _gather_pose_lifter_inputs(pose_results,
         for res in frame:
             inputs = dict()
 
-	    if 'keypoints' not in res:continue
+            if np.all(res['keypoints'] == -1):
+                res['keypoints'] = np.zeros((17, 3), dtype='float')
 
             if norm_pose_2d:
                 bbox = res['bbox']
@@ -245,7 +246,7 @@ def fill_sequence(pose_results_2d, keypoints, tid, max_win_size):
 
     num_seq = len(pose_results_2d)
     T, K, C = keypoints.shape
-    print('max_win_size ', max_win_size)
+  
     for fid in range(num_seq):
         for res in pose_results_2d[fid]:
             if res['track_id'] == tid:
